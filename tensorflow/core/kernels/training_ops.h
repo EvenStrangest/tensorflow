@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -31,6 +31,17 @@ struct ApplyGradientDescent {
   void operator()(const Device& d, typename TTypes<T>::Flat var,
                   typename TTypes<T>::ConstScalar alpha,
                   typename TTypes<T>::ConstFlat delta);
+};
+
+template <typename Device, typename T>
+struct ApplyAdadelta {
+  void operator()(const Device& d, typename TTypes<T>::Flat var,
+                  typename TTypes<T>::Flat accum,
+                  typename TTypes<T>::Flat accum_update,
+                  typename TTypes<T>::ConstScalar lr,
+                  typename TTypes<T>::ConstScalar rho,
+                  typename TTypes<T>::ConstScalar epsilon,
+                  typename TTypes<T>::ConstFlat grad);
 };
 
 template <typename Device, typename T>

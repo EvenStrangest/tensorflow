@@ -1,4 +1,4 @@
-# Copyright 2015 Google Inc. All Rights Reserved.
+# Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -412,10 +412,10 @@ class AsyncReaderTest(tf.test.TestCase):
       for i, d in enumerate(reversed(thread_data)):
         fname = os.path.join(self.get_temp_dir(), "deadlock.%s.txt" % i)
         with open(fname, "wb") as f:
-          f.write("file-%s" % i)
+          f.write(("file-%s" % i).encode())
         d.queue.enqueue_many([[fname]]).run()
         d.thread.join()
-        self.assertEqual([["file-%s" % i]], d.output)
+        self.assertEqual([[("file-%s" % i).encode()]], d.output)
 
   @staticmethod
   def _RunSessionAndSave(sess, args, output):

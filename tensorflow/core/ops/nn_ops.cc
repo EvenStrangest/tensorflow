@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -85,6 +85,7 @@ REGISTER_OP("BatchNormWithGlobalNormalization")
     .Attr("T: numbertype")
     .Attr("variance_epsilon: float")
     .Attr("scale_after_normalization: bool")
+    .Deprecated(9, "Use tf.nn.batch_normalization()")
     .Doc(R"doc(
 Batch normalization.
 
@@ -121,6 +122,7 @@ REGISTER_OP("BatchNormWithGlobalNormalizationGrad")
     .Attr("T: numbertype")
     .Attr("variance_epsilon: float")
     .Attr("scale_after_normalization: bool")
+    .Deprecated(9, "Use tf.nn.batch_normalization()")
     .Doc(R"doc(
 Gradients for batch normalization.
 
@@ -154,9 +156,60 @@ REGISTER_OP("BiasAdd")
     .Attr("T: numbertype")
     .Input("value: T")
     .Input("bias: T")
+    .Attr(GetConvnetDataFormatAttrString())
     .Output("output: T")
     .Doc(R"doc(
 Adds `bias` to `value`.
+
+This is a special case of `tf.add` where `bias` is restricted to be 1-D.
+Broadcasting is supported, so `value` may have any number of dimensions.
+
+value: Any number of dimensions.
+bias: 1-D with size the last dimension of `value`.
+data_format: Specify the data format of the input and output data. With the
+    default format "NHWC", the bias tensor will be added to the last dimension
+    of the value tensor.
+    Alternatively, the format could be "NCHW", the data storage order of:
+        [batch, in_channels, in_height, in_width].
+    The tensor will be added to "in_channels", the third-to-the-last
+        dimension.
+output: Broadcasted sum of `value` and `bias`.
+)doc");
+// --------------------------------------------------------------------------
+
+REGISTER_OP("BiasAddGrad")
+    .Attr("T: numbertype")
+    .Input("out_backprop: T")
+    .Attr(GetConvnetDataFormatAttrString())
+    .Output("output: T")
+    .Doc(R"doc(
+The backward operation for "BiasAdd" on the "bias" tensor.
+
+It accumulates all the values from out_backprop into the feature dimension.
+For NHWC data format, the feature dimension is the last. For NCHW data format,
+the feature dimension is the third-to-last.
+
+out_backprop: Any number of dimensions.
+output: 1-D with size the feature dimension of `out_backprop`.
+data_format: Specify the data format of the input and output data. With the
+    default format "NHWC", the bias tensor will be added to the last dimension
+    of the value tensor.
+    Alternatively, the format could be "NCHW", the data storage order of:
+        [batch, in_channels, in_height, in_width].
+    The tensor will be added to "in_channels", the third-to-the-last
+        dimension.
+)doc");
+// --------------------------------------------------------------------------
+
+REGISTER_OP("BiasAddV1")
+    .Attr("T: numbertype")
+    .Input("value: T")
+    .Input("bias: T")
+    .Output("output: T")
+    .Doc(R"doc(
+Adds `bias` to `value`.
+
+This is a deprecated version of BiasAdd and will be soon removed.
 
 This is a special case of `tf.add` where `bias` is restricted to be 1-D.
 Broadcasting is supported, so `value` may have any number of dimensions.
@@ -171,7 +224,7 @@ REGISTER_OP("Conv2D")
     .Input("input: T")
     .Input("filter: T")
     .Output("output: T")
-    .Attr("T: {float, double}")
+    .Attr("T: {half, float, double}")
     .Attr("strides: list(int)")
     .Attr("use_cudnn_on_gpu: bool = true")
     .Attr(GetPaddingAttrString())
@@ -192,7 +245,7 @@ performs the following:
 3. For each patch, right-multiplies the filter matrix and the image patch
    vector.
 
-In detail, with the default NCHW format,
+In detail, with the default NHWC format,
 
     output[b, i, j, k] =
         sum_{di, dj, q} input[b, strides[1] * i + di, strides[2] * j + dj, q] *
@@ -216,7 +269,7 @@ REGISTER_OP("Conv2DBackpropInput")
     .Input("filter: T")
     .Input("out_backprop: T")
     .Output("output: T")
-    .Attr("T: {float, double}")
+    .Attr("T: {half, float, double}")
     .Attr("strides: list(int)")
     .Attr("use_cudnn_on_gpu: bool = true")
     .Attr(GetPaddingAttrString())
@@ -249,9 +302,9 @@ data_format: Specify the data format of the input and output data. With the
 REGISTER_OP("Conv2DBackpropFilter")
     .Input("input: T")
     .Input("filter_sizes: int32")
-    .Output("output: T")
     .Input("out_backprop: T")
-    .Attr("T: {float, double}")
+    .Output("output: T")
+    .Attr("T: {half, float, double}")
     .Attr("strides: list(int)")
     .Attr("use_cudnn_on_gpu: bool = true")
     .Attr(GetPaddingAttrString())
@@ -313,6 +366,208 @@ strides: 1-D of length 4.  The stride of the sliding window for each dimension
 padding: The type of padding algorithm to use.
 )doc");
 
+REGISTER_OP("DepthwiseConv2dNativeBackpropInput")
+    .Input("input_sizes: int32")
+    .Input("filter: T")
+    .Input("out_backprop: T")
+    .Output("output: T")
+    .Attr("T: {float, double}")
+    .Attr("strides: list(int)")
+    .Attr(GetPaddingAttrString())
+    .Doc(R"doc(
+Computes the gradients of depthwise convolution with respect to the input.
+
+input_sizes: An integer vector representing the shape of `input`,
+  where `input` is a 4-D `[batch, height, width, channels]` tensor.
+filter: 4-D with shape
+  `[filter_height, filter_width, in_channels, depthwise_multiplier]`.
+out_backprop: 4-D with shape `[batch, out_height, out_width, out_channels]`.
+  Gradients w.r.t. the output of the convolution.
+strides: The stride of the sliding window for each dimension of the input
+  of the convolution.
+padding: The type of padding algorithm to use.
+output: 4-D with shape `[batch, in_height, in_width, in_channels]`.  Gradient
+  w.r.t. the input of the convolution.
+)doc");
+
+REGISTER_OP("DepthwiseConv2dNativeBackpropFilter")
+    .Input("input: T")
+    .Input("filter_sizes: int32")
+    .Input("out_backprop: T")
+    .Output("output: T")
+    .Attr("T: {float, double}")
+    .Attr("strides: list(int)")
+    .Attr(GetPaddingAttrString())
+    .Doc(R"doc(
+Computes the gradients of depthwise convolution with respect to the filter.
+
+input: 4-D with shape `[batch, in_height, in_width, in_channels]`.
+filter_sizes: An integer vector representing the tensor shape of `filter`,
+  where `filter` is a 4-D
+  `[filter_height, filter_width, in_channels, depthwise_multiplier]` tensor.
+out_backprop: 4-D with shape `[batch, out_height, out_width, out_channels]`.
+  Gradients w.r.t. the output of the convolution.
+strides: The stride of the sliding window for each dimension of the input
+  of the convolution.
+padding: The type of padding algorithm to use.
+output: 4-D with shape
+  `[filter_height, filter_width, in_channels, out_channels]`.  Gradient w.r.t.
+  the `filter` input of the convolution.
+)doc");
+
+// --------------------------------------------------------------------------
+REGISTER_OP("Conv3D")
+    .Input("input: T")
+    .Input("filter: T")
+    .Output("output: T")
+    .Attr("T: numbertype")
+    .Attr("strides: list(int) >= 5")
+    .Attr(GetPaddingAttrString())
+    .Doc(R"doc(
+Computes a 3-D convolution given 5-D `input` and `filter` tensors.
+
+In signal processing, cross-correlation is a measure of similarity of
+two waveforms as a function of a time-lag applied to one of them. This
+is also known as a sliding dot product or sliding inner-product.
+
+Our Conv3D implements a form of cross-correlation.
+
+input: Shape `[batch, in_depth, in_height, in_width, in_channels]`.
+filter: Shape `[filter_depth, filter_height, filter_width, in_channels, out_channels]`.
+  `in_channels` must match between `input` and `filter`.
+strides: 1-D tensor of length 5. The stride of the sliding window for each
+  dimension of `input`. Must have `strides[0] = strides[4] = 1`.
+padding: The type of padding algorithm to use.
+
+)doc");
+
+REGISTER_OP("Conv3DBackpropInput")
+    .Input("input: T")
+    .Input("filter: T")
+    .Input("out_backprop: T")
+    .Output("output: T")
+    .Attr("T: numbertype")
+    .Attr("strides: list(int) >= 5")
+    .Attr(GetPaddingAttrString())
+    .Doc(R"doc(
+Computes the gradients of 3D convolution with respect to the input.
+
+input: Shape `[batch, depth, rows, cols, in_channels]`.
+filter: Shape `[depth, rows, cols, in_channels, out_channels]`.
+  `in_channels` must match between `input` and `filter`.
+out_backprop: Backprop signal of shape `[batch, out_depth, out_rows, out_cols, out_channels]`.
+strides: 1-D tensor of length 5. The stride of the sliding window for each
+  dimension of `input`. Must have `strides[0] = strides[4] = 1`.
+padding: The type of padding algorithm to use.
+
+)doc");
+
+REGISTER_OP("Conv3DBackpropFilter")
+    .Input("input: T")
+    .Input("filter: T")
+    .Input("out_backprop: T")
+    .Output("output: T")
+    .Attr("T: numbertype")
+    .Attr("strides: list(int) >= 5")
+    .Attr(GetPaddingAttrString())
+    .Doc(R"doc(
+Computes the gradients of 3D convolution with respect to the filter.
+
+input: Shape `[batch, depth, rows, cols, in_channels]`.
+filter: Shape `[depth, rows, cols, in_channels, out_channels]`.
+  `in_channels` must match between `input` and `filter`.
+out_backprop: Backprop signal of shape `[batch, out_depth, out_rows, out_cols, out_channels]`.
+strides: 1-D tensor of length 5. The stride of the sliding window for each
+  dimension of `input`. Must have `strides[0] = strides[4] = 1`.
+padding: The type of padding algorithm to use.
+
+)doc");
+
+// --------------------------------------------------------------------------
+
+REGISTER_OP("AvgPool3D")
+    .Input("input: T")
+    .Output("output: T")
+    .Attr("ksize: list(int) >= 5")
+    .Attr("strides: list(int) >= 5")
+    .Attr(GetPaddingAttrString())
+    .Attr("T: numbertype")
+    .Doc(R"doc(
+Performs 3D average pooling on the input.
+
+ksize: 1-D tensor of length 5. The size of the window for each dimension of
+  the input tensor. Must have `ksize[0] = ksize[1] = 1`.
+strides: 1-D tensor of length 5. The stride of the sliding window for each
+  dimension of `input`. Must have `strides[0] = strides[4] = 1`.
+padding: The type of padding algorithm to use.
+input: Shape `[batch, depth, rows, cols, channels]` tensor to pool over.
+output: The average pooled output tensor.
+)doc");
+
+REGISTER_OP("AvgPool3DGrad")
+    .Input("orig_input_shape: int32")
+    .Input("grad: T")
+    .Output("output: T")
+    .Attr("ksize: list(int) >= 5")
+    .Attr("strides: list(int) >= 5")
+    .Attr(GetPaddingAttrString())
+    .Attr("T: numbertype")
+    .Doc(R"doc(
+Computes gradients of average pooling function.
+
+ksize: 1-D tensor of length 5. The size of the window for each dimension of
+  the input tensor. Must have `ksize[0] = ksize[1] = 1`.
+strides: 1-D tensor of length 5. The stride of the sliding window for each
+  dimension of `input`. Must have `strides[0] = strides[4] = 1`.
+padding: The type of padding algorithm to use.
+orig_input_shape: The original input dimensions.
+grad: Output backprop of shape `[batch, depth, rows, cols, channels]`.
+output: The backprop for input.
+)doc");
+
+// --------------------------------------------------------------------------
+
+REGISTER_OP("MaxPool3D")
+    .Input("input: T")
+    .Output("output: T")
+    .Attr("ksize: list(int) >= 5")
+    .Attr("strides: list(int) >= 5")
+    .Attr(GetPaddingAttrString())
+    .Attr("T: numbertype")
+    .Doc(R"doc(
+Performs 3D max pooling on the input.
+
+ksize: 1-D tensor of length 5. The size of the window for each dimension of
+  the input tensor. Must have `ksize[0] = ksize[1] = 1`.
+strides: 1-D tensor of length 5. The stride of the sliding window for each
+  dimension of `input`. Must have `strides[0] = strides[4] = 1`.
+padding: The type of padding algorithm to use.
+input: Shape `[batch, depth, rows, cols, channels]` tensor to pool over.
+output: The max pooled output tensor.
+)doc");
+
+REGISTER_OP("MaxPool3DGrad")
+    .Input("orig_input: float")
+    .Input("orig_output: float")
+    .Input("grad: T")
+    .Output("output: T")
+    .Attr("ksize: list(int) >= 5 ")
+    .Attr("strides: list(int) >= 5")
+    .Attr(GetPaddingAttrString())
+    .Attr("T: numbertype")
+    .Doc(R"doc(
+Computes gradients of max pooling function.
+
+ksize: 1-D tensor of length 5. The size of the window for each dimension of
+  the input tensor. Must have `ksize[0] = ksize[1] = 1`.
+strides: 1-D tensor of length 5. The stride of the sliding window for each
+  dimension of `input`. Must have `strides[0] = strides[4] = 1`.
+padding: The type of padding algorithm to use.
+orig_input: The original input tensor.
+orig_output: The original output tensor.
+grad: Output backprop of shape `[batch, depth, rows, cols, channels]`.
+)doc");
+
 // --------------------------------------------------------------------------
 
 REGISTER_OP("L2Loss")
@@ -349,7 +604,7 @@ each component is divided by the weighted, squared sum of inputs within
 
     sqr_sum[a, b, c, d] =
         sum(input[a, b, c, d - depth_radius : d + depth_radius + 1] ** 2)
-    output = input / (bias + alpha * sqr_sum ** beta)
+    output = input / (bias + alpha * sqr_sum) ** beta
 
 For details, see [Krizhevsky et al., ImageNet classification with deep
 convolutional neural networks (NIPS 2012)]
@@ -485,6 +740,99 @@ output: Gradients w.r.t. the input of `max_pool`.
 
 // --------------------------------------------------------------------------
 
+REGISTER_OP("Dilation2D")
+    .Input("input: T")
+    .Input("filter: T")
+    .Output("output: T")
+    .Attr("T: realnumbertype")
+    .Attr("strides: list(int) >= 4")
+    .Attr("rates: list(int) >= 4")
+    .Attr(GetPaddingAttrString())
+    .Doc(R"doc(
+Computes the grayscale dilation of 4-D `input` and 3-D `filter` tensors.
+
+The `input` tensor has shape `[batch, in_height, in_width, depth]` and the
+`filter` tensor has shape `[filter_height, filter_width, depth]`, i.e., each
+input channel is processed independently of the others with its own structuring
+function. The `output` tensor has shape
+`[batch, out_height, out_width, depth]`. The spatial dimensions of the output
+tensor depend on the `padding` algorithm. We currently only support the default
+"NHWC" `data_format`.
+
+In detail, the grayscale morphological 2-D dilation is the max-sum correlation
+(for consistency with `conv2d`, we use unmirrored filters):
+
+    output[b, y, x, c] =
+       max_{dy, dx} input[b,
+                          strides[1] * y + rates[1] * dy,
+                          strides[2] * x + rates[2] * dx,
+                          c] +
+                    filter[dy, dx, c]
+
+Max-pooling is a special case when the filter has size equal to the pooling
+kernel size and contains all zeros.
+
+Duality: The dilation of `input` by the `filter` is equal to the negation of
+the erosion of `-input` by the reflected `filter`.
+
+input: 4-D with shape `[batch, in_height, in_width, depth]`.
+filter: 3-D with shape `[filter_height, filter_width, depth]`.
+strides: The stride of the sliding window for each dimension of the input
+ tensor. Must be: `[1, stride_height, stride_width, 1]`.
+rates: The input stride for atrous morphological dilation. Must be:
+ `[1, rate_height, rate_width, 1]`.
+padding: The type of padding algorithm to use.
+output: 4-D with shape `[batch, out_height, out_width, depth]`.
+)doc");
+
+REGISTER_OP("Dilation2DBackpropInput")
+    .Input("input: T")
+    .Input("filter: T")
+    .Input("out_backprop: T")
+    .Output("in_backprop: T")
+    .Attr("T: realnumbertype")
+    .Attr("strides: list(int) >= 4")
+    .Attr("rates: list(int) >= 4")
+    .Attr(GetPaddingAttrString())
+    .Doc(R"doc(
+Computes the gradient of morphological 2-D dilation with respect to the input.
+
+input: 4-D with shape `[batch, in_height, in_width, depth]`.
+filter: 3-D with shape `[filter_height, filter_width, depth]`.
+out_backprop: 4-D with shape `[batch, out_height, out_width, depth]`.
+in_backprop: 4-D with shape `[batch, in_height, in_width, depth]`.
+strides: 1-D of length 4. The stride of the sliding window for each dimension of
+  the input tensor. Must be: `[1, stride_height, stride_width, 1]`.
+rates: 1-D of length 4. The input stride for atrous morphological dilation.
+  Must be: `[1, rate_height, rate_width, 1]`.
+padding: The type of padding algorithm to use.
+)doc");
+
+REGISTER_OP("Dilation2DBackpropFilter")
+    .Input("input: T")
+    .Input("filter: T")
+    .Input("out_backprop: T")
+    .Output("filter_backprop: T")
+    .Attr("T: realnumbertype")
+    .Attr("strides: list(int) >= 4")
+    .Attr("rates: list(int) >= 4")
+    .Attr(GetPaddingAttrString())
+    .Doc(R"doc(
+Computes the gradient of morphological 2-D dilation with respect to the filter.
+
+input: 4-D with shape `[batch, in_height, in_width, depth]`.
+filter: 3-D with shape `[filter_height, filter_width, depth]`.
+out_backprop: 4-D with shape `[batch, out_height, out_width, depth]`.
+filter_backprop: 3-D with shape `[filter_height, filter_width, depth]`.
+strides: 1-D of length 4. The stride of the sliding window for each dimension of
+  the input tensor. Must be: `[1, stride_height, stride_width, 1]`.
+rates: 1-D of length 4. The input stride for atrous morphological dilation.
+  Must be: `[1, rate_height, rate_width, 1]`.
+padding: The type of padding algorithm to use.
+)doc");
+
+// --------------------------------------------------------------------------
+
 REGISTER_OP("Relu")
     .Input("features: T")
     .Output("activations: T")
@@ -601,7 +949,7 @@ backprops: The gradients: `gradients / (1 + abs(-features)) ** 2`.
 REGISTER_OP("Softmax")
     .Input("logits: T")
     .Output("softmax: T")
-    .Attr("T: {float, double}")
+    .Attr("T: {half, float, double}")
     .Doc(R"doc(
 Computes softmax activations.
 
@@ -615,12 +963,29 @@ softmax: Same shape as `logits`.
 
 // --------------------------------------------------------------------------
 
+REGISTER_OP("LogSoftmax")
+    .Input("logits: T")
+    .Output("logsoftmax: T")
+    .Attr("T: {half, float, double}")
+    .Doc(R"doc(
+Computes log softmax activations.
+
+For each batch `i` and class `j` we have
+
+    logsoftmax[i, j] = logits[i, j] - log(sum(exp(logits[i])))
+
+logits: 2-D with shape `[batch_size, num_classes]`.
+logsoftmax: Same shape as `logits`.
+)doc");
+
+// --------------------------------------------------------------------------
+
 REGISTER_OP("SoftmaxCrossEntropyWithLogits")
     .Input("features: T")
     .Input("labels: T")
     .Output("loss: T")
     .Output("backprop: T")
-    .Attr("T: {float, double}")
+    .Attr("T: {half, float, double}")
     .Doc(R"doc(
 Computes softmax cross entropy cost and gradients to backpropagate.
 
@@ -636,10 +1001,11 @@ backprop: backpropagated gradients (batch_size x num_classes matrix).
 
 REGISTER_OP("SparseSoftmaxCrossEntropyWithLogits")
     .Input("features: T")
-    .Input("labels: int64")
+    .Input("labels: Tlabels")
     .Output("loss: T")
     .Output("backprop: T")
-    .Attr("T: {float, double}")
+    .Attr("T: {half, float, double}")
+    .Attr("Tlabels: {int32, int64} = DT_INT64")
     .Doc(R"doc(
 Computes softmax cross entropy cost and gradients to backpropagate.
 
@@ -697,6 +1063,7 @@ REGISTER_OP("TopK")
     .Attr("k: int >= 0")
     .Attr("sorted: bool = true")
     .Attr("T: realnumbertype")
+    .Deprecated(7, "Use TopKV2 instead")
     .Doc(R"doc(
 Finds values and indices of the `k` largest elements for the last dimension.
 

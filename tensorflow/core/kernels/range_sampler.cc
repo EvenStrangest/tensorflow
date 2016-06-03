@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -119,8 +119,7 @@ void RangeSampler::SampleBatchGetExpectedCountAvoid(
   }
 }
 
-AllSampler::AllSampler(int64 range)
-    : RangeSampler(range), inv_range_(1.0 / range) {}
+AllSampler::AllSampler(int64 range) : RangeSampler(range) {}
 
 void AllSampler::SampleBatchGetExpectedCountAvoid(
     random::SimplePhilox* rnd, bool unique, MutableArraySlice<int64> batch,

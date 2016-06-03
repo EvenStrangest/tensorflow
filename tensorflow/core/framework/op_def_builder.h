@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -89,6 +89,9 @@ class OpDefBuilder {
   OpDefBuilder& SetIsStateful();
   OpDefBuilder& SetAllowsUninitializedInput();
 
+  // Deprecate the op at a certain GraphDef version.
+  OpDefBuilder& Deprecated(int version, StringPiece explanation);
+
   // Adds docs to this OpDefBuilder (and returns *this).
   // Docs have the format:
   //   <1-line summary>
@@ -102,7 +105,11 @@ class OpDefBuilder {
   // may start the description with an "=" (like name:= <description>)
   // to suppress the automatically-generated type documentation in
   // generated output.
+#ifndef TF_LEAN_BINARY
   OpDefBuilder& Doc(StringPiece text);
+#else
+  OpDefBuilder& Doc(StringPiece text) { return *this; }
+#endif
 
   // Sets *op_def to the requested OpDef, or returns an error.
   // Must be called after all of the above methods.

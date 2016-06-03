@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@ REGISTER_OP("ResizeArea")
     .Input("images: T")
     .Input("size: int32")
     .Output("resized_images: float")
-    .Attr("T: {uint8, int8, int16, int32, int64, float, double}")
+    .Attr("T: {uint8, int8, int16, int32, int64, half, float, double}")
     .Attr("align_corners: bool = false")
     .Doc(R"doc(
 Resize `images` to `size` using area interpolation.
@@ -44,7 +44,7 @@ REGISTER_OP("ResizeBicubic")
     .Input("images: T")
     .Input("size: int32")
     .Output("resized_images: float")
-    .Attr("T: {uint8, int8, int16, int32, int64, float, double}")
+    .Attr("T: {uint8, int8, int16, int32, int64, half, float, double}")
     .Attr("align_corners: bool = false")
     .Doc(R"doc(
 Resize `images` to `size` using bicubic interpolation.
@@ -66,7 +66,7 @@ REGISTER_OP("ResizeBilinear")
     .Input("images: T")
     .Input("size: int32")
     .Output("resized_images: float")
-    .Attr("T: {uint8, int8, int16, int32, int64, float, double}")
+    .Attr("T: {uint8, int8, int16, int32, int64, half, float, double}")
     .Attr("align_corners: bool = false")
     .Doc(R"doc(
 Resize `images` to `size` using bilinear interpolation.
@@ -88,7 +88,7 @@ REGISTER_OP("ResizeBilinearGrad")
     .Input("grads: float")
     .Input("original_image: T")
     .Output("output: T")
-    .Attr("T: {float, double}")
+    .Attr("T: {float, half, double}")
     .Attr("align_corners: bool = false")
     .Doc(R"doc(
 Computes the gradient of bilinear interpolation.
@@ -109,7 +109,7 @@ REGISTER_OP("ResizeNearestNeighbor")
     .Input("images: T")
     .Input("size: int32")
     .Output("resized_images: T")
-    .Attr("T: {uint8, int8, int16, int32, int64, float, double}")
+    .Attr("T: {uint8, int8, int16, int32, int64, half, float, double}")
     .Attr("align_corners: bool = false")
     .Doc(R"doc(
 Resize `images` to `size` using nearest neighbor interpolation.
@@ -129,7 +129,7 @@ REGISTER_OP("ResizeNearestNeighborGrad")
     .Input("grads: T")
     .Input("size: int32")
     .Output("output: T")
-    .Attr("T: {uint8, int8, int32, float, double}")
+    .Attr("T: {uint8, int8, int32, half, float, double}")
     .Attr("align_corners: bool = false")
     .Doc(R"doc(
 Computes the gradient of nearest neighbor interpolation.
@@ -153,6 +153,7 @@ REGISTER_OP("RandomCrop")
     .Attr("seed: int = 0")
     .Attr("seed2: int = 0")
     .SetIsStateful()
+    .Deprecated(8, "Random crop is now pure Python")
     .Doc(R"doc(
 Randomly crop `image`.
 
@@ -267,6 +268,7 @@ REGISTER_OP("AdjustContrast")
     .Input("max_value: float")
     .Output("output: float")
     .Attr("T: {uint8, int8, int16, int32, int64, float, double}")
+    .Deprecated(2, "Use AdjustContrastv2 instead")
     .Doc(R"Doc(
 Deprecated. Disallowed in GraphDef version >= 2.
 )Doc");
@@ -385,9 +387,10 @@ output: `images` converted to RGB.
 
 // --------------------------------------------------------------------------
 REGISTER_OP("DrawBoundingBoxes")
-    .Input("images: float")
+    .Input("images: T")
     .Input("boxes: float")
-    .Output("output: float")
+    .Output("output: T")
+    .Attr("T: {float, half} = DT_FLOAT")
     .Doc(R"doc(
 Draw bounding boxes on a batch of images.
 
@@ -492,4 +495,65 @@ use_image_if_no_bounding_boxes: Controls behavior if no bounding boxes supplied.
   If true, assume an implicit bounding box covering the whole input. If false,
   raise an error.
 )doc");
+
+
+// --------------------------------------------------------------------------
+
+// glimpse = extract_glimpse(input, size, offsets) extract the glimpse
+// of size `size` centered at location `offsets` from the input tensor
+// `input`.
+//
+// REQUIRES: input.dims() == 4
+//
+REGISTER_OP("ExtractGlimpse")
+    .Input("input: float")
+    .Input("size: int32")
+    .Input("offsets: float")
+    .Output("glimpse: float")
+    .Attr("centered: bool = true")
+    .Attr("normalized: bool = true")
+    .Attr("uniform_noise: bool = true")
+    .Doc(R"doc(
+Extracts a glimpse from the input tensor.
+
+Returns a set of windows called glimpses extracted at location
+`offsets` from the input tensor. If the windows only partially
+overlaps the inputs, the non overlapping areas will be filled with
+random noise.
+
+The result is a 4-D tensor of shape `[batch_size, glimpse_height,
+glimpse_width, channels]`. The channels and batch dimensions are the
+same as that of the input tensor. The height and width of the output
+windows are specified in the `size` parameter.
+
+The argument `normalized` and `centered` controls how the windows are
+built:
+
+* If the coordinates are normalized but not centered, 0.0 and 1.0
+  correspond to the minimum and maximum of each height and width
+  dimension.
+* If the coordinates are both normalized and centered, they range from
+  -1.0 to 1.0. The coordinates (-1.0, -1.0) correspond to the upper
+  left corner, the lower right corner is located at (1.0, 1.0) and the
+  center is at (0, 0).
+* If the coordinates are not normalized they are interpreted as
+  numbers of pixels.
+
+input: A 4-D float tensor of shape `[batch_size, height, width, channels]`.
+size: A 1-D tensor of 2 elements containing the size of the glimpses
+  to extract.  The glimpse height must be specified first, following
+  by the glimpse width.
+offsets: A 2-D integer tensor of shape `[batch_size, 2]` containing
+  the x, y locations of the center of each window.
+glimpse: A tensor representing the glimpses `[batch_size,
+  glimpse_height, glimpse_width, channels]`.
+centered: indicates if the offset coordinates are centered relative to
+  the image, in which case the (0, 0) offset is relative to the center
+  of the input images. If false, the (0,0) offset corresponds to the
+  upper left corner of the input images.
+normalized: indicates if the offset coordinates are normalized.
+uniform_noise: indicates if the noise should be generated using a
+  uniform distribution or a gaussian distribution.
+)doc");
+
 }  // namespace tensorflow

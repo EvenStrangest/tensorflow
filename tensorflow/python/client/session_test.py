@@ -1,4 +1,4 @@
-# Copyright 2015 Google Inc. All Rights Reserved.
+# Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -25,10 +25,11 @@ import numpy as np
 import six
 from six.moves import xrange  # pylint: disable=redefined-builtin
 
-from tensorflow.core.framework import config_pb2
 from tensorflow.core.lib.core import error_codes_pb2
+from tensorflow.core.protobuf import config_pb2
 from tensorflow.python.client import session
 from tensorflow.python.framework import dtypes
+from tensorflow.python.framework import errors
 from tensorflow.python.framework import ops
 from tensorflow.python.framework import tensor_util
 from tensorflow.python.framework import test_util
@@ -69,7 +70,7 @@ class SessionTest(test_util.TensorFlowTestCase):
 
   def testCreate(self):
     with session.Session():
-      inp = constant_op.constant(10.0, name='W1')
+      inp = constant_op.constant(10.0, shape=[2, 3], name='W1')
       copy = array_ops.identity(inp)
       # Test with feed.
       # TODO(mrry): Investigate why order='F' didn't work.
@@ -78,7 +79,8 @@ class SessionTest(test_util.TensorFlowTestCase):
       self.assertAllEqual(arr, copy_val)
       # Test without feed.
       copy_val = copy.eval()
-      self.assertAllEqual(np.asarray(10.0, dtype=np.float32), copy_val)
+      self.assertAllEqual(np.asarray([[10.0, 10.0, 10.0], [10.0, 10.0, 10.0]],
+                                     dtype=np.float32), copy_val)
 
   def testManyCPUs(self):
     # TODO(keveman): Implement ListDevices and test for the number of
@@ -96,6 +98,21 @@ class SessionTest(test_util.TensorFlowTestCase):
       inp = constant_op.constant(10.0, name='W1')
       self.assertAllEqual(inp.eval(), 10.0)
 
+  def testSessionInterOpThreadPool(self):
+    config = config_pb2.ConfigProto()
+    pool = config.session_inter_op_thread_pool.add()
+    with session.Session(config=config) as s:
+      inp = constant_op.constant(10.0, name='W1')
+      results = s.run([inp])
+      self.assertAllEqual([10.0], results)
+
+    pool = config.session_inter_op_thread_pool.add()
+    pool.num_threads = 1
+    with session.Session(config=config) as s:
+      inp = constant_op.constant(20.0, name='W2')
+      results = s.run([inp])
+      self.assertAllEqual([20.0], results)
+
   def testErrorsReported(self):
     with session.Session() as s:
       constant_op.constant(10.0, name='W1')
@@ -107,6 +124,19 @@ class SessionTest(test_util.TensorFlowTestCase):
       a = array_ops.placeholder(dtypes.float32)
       with self.assertRaisesOpError(lambda e: e.op == a.op):
         a.eval()
+
+  def testErrorCodeWithNoNodeDef(self):
+    with session.Session() as s:
+      a = array_ops.placeholder(dtypes.float32, shape=[])
+      b = array_ops.placeholder(dtypes.float32, shape=[])
+      r1 = math_ops.add(a, b)
+
+      def exc_predicate(e):
+        return (e.op is None and e.node_def is None and
+                e.error_code == error_codes_pb2.INVALID_ARGUMENT)
+      with self.assertRaisesOpError(exc_predicate):
+        # Run with a bogus handle.
+        s.partial_run('foo', r1, feed_dict={a: 1, b: 2})
 
   def testOpConstructionErrorPayload(self):
     with session.Session():
@@ -152,10 +182,16 @@ class SessionTest(test_util.TensorFlowTestCase):
       a_val, b_val = s.run([a, b])  # Test multiple fetches.
       self.assertAllEqual([[1.0, 1.0]], a_val)
       self.assertAllEqual([[2.0, 2.0, 2.0], [2.0, 2.0, 2.0]], b_val)
+      results_with_dict = s.run({'a': [a], 'b': b, 'z': [a, b]})
+      self.assertAllEqual([[1.0, 1.0]], results_with_dict['a'][0])
+      self.assertAllEqual([[2.0, 2.0, 2.0], [2.0, 2.0, 2.0]],
+                          results_with_dict['b'])
+      self.assertAllEqual(results_with_dict['a'][0], results_with_dict['z'][0])
+      self.assertAllEqual(results_with_dict['b'], results_with_dict['z'][1])
 
   def testFetchScalar(self):
     with session.Session() as s:
-      for scalar in np.int32, np.int64, np.float32, np.float64:
+      for scalar in np.int32, np.int64, np.float16, np.float32, np.float64:
         x = scalar(7)
         y = scalar(8)
         tf_x = constant_op.constant(x, shape=[])
@@ -167,6 +203,10 @@ class SessionTest(test_util.TensorFlowTestCase):
         self.assertEqual(x + y, xy)
         # List fetch
         xy, = s.run([tf_xy])
+        self.assertEqual(scalar, type(xy))
+        self.assertEqual(x + y, xy)
+        # Dict fetch
+        xy = s.run({'xy': tf_xy})['xy']
         self.assertEqual(scalar, type(xy))
         self.assertEqual(x + y, xy)
 
@@ -213,6 +253,21 @@ class SessionTest(test_util.TensorFlowTestCase):
       self.assertAllEqual(sp_out.indices, indices)
       self.assertAllEqual(sp_out.values, values)
       self.assertAllEqual(sp_out.shape, shape)
+      # Dict fetch (single value), use as tuple
+      indices_out, values_out, shape_out = s.run({'sp': sp})['sp']
+      self.assertAllEqual(indices_out, indices)
+      self.assertAllEqual(values_out, values)
+      self.assertAllEqual(shape_out, shape)
+      # Dict fetch (list value), use as tuple
+      (indices_out, values_out, shape_out), = s.run({'sp': [sp]})['sp']
+      self.assertAllEqual(indices_out, indices)
+      self.assertAllEqual(values_out, values)
+      self.assertAllEqual(shape_out, shape)
+      # Dict fetch, use as SparseTensorValue
+      sp_out = s.run({'sp': sp})['sp']
+      self.assertAllEqual(sp_out.indices, indices)
+      self.assertAllEqual(sp_out.values, values)
+      self.assertAllEqual(sp_out.shape, shape)
 
   def testFeedSparseTensor(self):
     with session.Session() as s:
@@ -245,6 +300,55 @@ class SessionTest(test_util.TensorFlowTestCase):
       self.assertAllEqual(sp2_out.indices, indices)
       self.assertAllEqual(sp2_out.values, values)
       self.assertAllEqual(sp2_out.shape, shape)
+
+  def testFeedSparsePlaceholder(self):
+    with session.Session() as s:
+      indices = np.array([[3, 2, 0], [4, 5, 1]]).astype(np.int64)
+      values = np.array([1.0, 2.0]).astype(np.float32)
+      shape = np.array([7, 9, 2]).astype(np.int64)
+      sp = array_ops.sparse_placeholder(dtype=np.float32, name='placeholder1')
+      sp_indices = array_ops.identity(sp.indices)
+      sp_values = array_ops.identity(sp.values)
+      sp_shape = array_ops.identity(sp.shape)
+      sp2 = ops.SparseTensor(sp_indices, sp_values, sp_shape)
+      # Feed with tuple
+      indices_out, values_out, shape_out = s.run(
+          [sp_indices, sp_values, sp_shape], {sp: (indices, values, shape)})
+      self.assertAllEqual(indices_out, indices)
+      self.assertAllEqual(values_out, values)
+      self.assertAllEqual(shape_out, shape)
+      # Feed with SparseTensorValue
+      indices_out, values_out, shape_out = s.run(
+          [sp_indices, sp_values, sp_shape],
+          {sp: ops.SparseTensorValue(indices, values, shape)})
+      self.assertAllEqual(indices_out, indices)
+      self.assertAllEqual(values_out, values)
+      self.assertAllEqual(shape_out, shape)
+      # Feed with SparseTensorValue, fetch SparseTensorValue
+      sp2_out = s.run(sp2, {sp: ops.SparseTensorValue(indices, values, shape)})
+      self.assertAllEqual(sp2_out.indices, indices)
+      self.assertAllEqual(sp2_out.values, values)
+      self.assertAllEqual(sp2_out.shape, shape)
+
+  def testFeedSparePlaceholderConstantShape(self):
+    with session.Session() as s:
+      indices = np.array([[3, 2, 0], [4, 5, 1]]).astype(np.int64)
+      values = np.array([1.0, 2.0]).astype(np.float32)
+      shape = np.array([7, 9, 2]).astype(np.int64)
+      sp = array_ops.sparse_placeholder(dtype=np.float32,
+                                        shape=shape,
+                                        name='placeholder1')
+      self.assertAllEqual(sp.shape.eval(session=s), shape)
+      self.assertAllEqual(tensor_util.constant_value(sp.shape), shape)
+      sp_indices = array_ops.identity(sp.indices)
+      sp_values = array_ops.identity(sp.values)
+      sp_shape = array_ops.identity(sp.shape)
+      # Feed with tuple
+      indices_out, values_out, shape_out = s.run(
+          [sp_indices, sp_values, sp_shape], {sp: (indices, values)})
+      self.assertAllEqual(indices_out, indices)
+      self.assertAllEqual(values_out, values)
+      self.assertAllEqual(shape_out, shape)
 
   def testFetchIndexedSlices(self):
     with session.Session() as s:
@@ -643,6 +747,48 @@ class SessionTest(test_util.TensorFlowTestCase):
       self.assertAllEqual([[24.0]], e.eval())
       sess.close()
 
+  def testInteractivePlacePrunedGraph(self):
+    sess = session.InteractiveSession()
+
+    # Build a graph that has a bad op in it (no kernel).
+    #
+    # This test currently does not link in any GPU kernels,
+    # which is why placing this is invalid.  If at some point
+    # GPU kernels are added to this test, some other different
+    # op / device combo should be chosen.
+    with ops.device('/gpu:0'):
+      a = constant_op.constant(1.0, shape=[1, 2])
+
+    b = constant_op.constant(1.0, shape=[1, 2])
+
+    # Only run the valid op, this should work.
+    b.eval()
+
+    with self.assertRaises(errors.InvalidArgumentError):
+      a.eval()
+    sess.close()
+
+  def testDefaultSessionPlacePrunedGraph(self):
+    sess = session.Session()
+
+    # Build a graph that has a bad op in it (no kernel).
+    #
+    # This test currently does not link in any GPU kernels,
+    # which is why placing this is invalid.  If at some point
+    # GPU kernels are added to this test, some other different
+    # op / device combo should be chosen.
+    with ops.device('/gpu:0'):
+      _ = constant_op.constant(1.0, shape=[1, 2])
+
+    b = constant_op.constant(1.0, shape=[1, 2])
+
+    with self.assertRaises(errors.InvalidArgumentError):
+      # Even though we don't run the bad op, we place the entire
+      # graph, which should fail with a non-interactive session.
+      sess.run(b)
+
+    sess.close()
+
   def testSharedGraph(self):
     with ops.Graph().as_default() as g, ops.device('/cpu:0'):
       a = constant_op.constant(1.0, shape=[1, 2])
@@ -664,7 +810,8 @@ class SessionTest(test_util.TensorFlowTestCase):
 
   def testFeedAndFetch(self):
     with session.Session():
-      for dtype in [dtypes.float32,
+      for dtype in [dtypes.float16,
+                    dtypes.float32,
                     dtypes.float64,
                     dtypes.int32,
                     dtypes.uint8,
@@ -672,7 +819,8 @@ class SessionTest(test_util.TensorFlowTestCase):
                     dtypes.int8,
                     dtypes.int64,
                     dtypes.bool,
-                    dtypes.complex64]:
+                    dtypes.complex64,
+                    dtypes.complex128]:
         for shape in [(32, 4, 128), (37,), (2, 0, 6), (0, 0, 0)]:
           np_dtype = dtype.as_numpy_dtype
 
@@ -683,6 +831,8 @@ class SessionTest(test_util.TensorFlowTestCase):
 
           if dtype == dtypes.bool:
             np_array = np_array > 0
+          elif dtype == dtypes.complex64:
+            np_array = np.sqrt(np_array.astype(np_dtype))
           elif dtype == dtypes.complex64:
             np_array = np.sqrt(np_array.astype(np_dtype))
           else:
@@ -702,6 +852,22 @@ class SessionTest(test_util.TensorFlowTestCase):
         out_t.eval(feed_dict={feed_t: feed_val})
       with self.assertRaisesRegexp(TypeError, 'cannot be a tf.Tensor object'):
         out_t.op.run(feed_dict={feed_t: feed_val})
+
+  def testFeedPrecisionLossError(self):
+    with session.Session() as sess:
+      largest_int64 = np.iinfo(np.int64).max
+
+      feed_int_implicit_int32 = constant_op.constant(1)
+      feed_int_explicit_int32 = constant_op.constant(1, dtype=dtypes.int32)
+
+      out_t = constant_op.constant(1.0)
+
+      with self.assertRaisesRegexp(TypeError,
+                                   'is not compatible with Tensor type'):
+        sess.run(out_t, feed_dict={feed_int_implicit_int32: largest_int64})
+      with self.assertRaisesRegexp(TypeError,
+                                   'is not compatible with Tensor type'):
+        sess.run(out_t, feed_dict={feed_int_explicit_int32: largest_int64})
 
   def testStringFetch(self):
     with session.Session():
@@ -751,8 +917,8 @@ class SessionTest(test_util.TensorFlowTestCase):
 
   def testInvalidTargetFails(self):
     with self.assertRaisesRegexp(
-        RuntimeError,
-        'No session factory registered for the given session options.'):
+        errors.NotFoundError,
+        'No session factory registered for the given session options'):
       session.Session('INVALID_TARGET')
 
   def testFetchByNameDifferentStringTypes(self):
@@ -887,11 +1053,143 @@ class SessionTest(test_util.TensorFlowTestCase):
       self.assertEqual(steps, len(res))
       self.assertEqual(2.0, res[-1])
 
+  def testRunAndPartialRun(self):
+    with session.Session() as sess:
+      a = constant_op.constant(2.0, dtypes.float32)
+      b = a * 2
+      c = b * 3
+      r1 = sess.run([b, c])
+      h = sess.partial_run_setup([b, c], [])
+      r2 = sess.partial_run(h, [b, c])
+      self.assertEqual(r1, r2)
+
   def testFeedDictKeyException(self):
     with session.Session() as sess:
       a = constant_op.constant(1.0, dtypes.float32, name='a')
       with self.assertRaisesRegexp(TypeError, "Cannot interpret feed_dict"):
         sess.run(a, feed_dict={'a': [2.0]})
+
+  def testPerStepTrace(self):
+    run_options = config_pb2.RunOptions(
+        trace_level=config_pb2.RunOptions.FULL_TRACE)
+    run_metadata = config_pb2.RunMetadata()
+
+    with ops.device('/cpu:0'):
+      with session.Session() as sess:
+        sess.run(constant_op.constant(1.0))
+        self.assertTrue(not run_metadata.HasField('step_stats'))
+
+        sess.run(constant_op.constant(1.0), run_metadata=run_metadata)
+        self.assertTrue(not run_metadata.HasField('step_stats'))
+
+        sess.run(constant_op.constant(1.0),
+                 options=run_options,
+                 run_metadata=run_metadata)
+
+        self.assertTrue(run_metadata.HasField('step_stats'))
+        self.assertEquals(len(run_metadata.step_stats.dev_stats), 1)
+
+  def testRunOptionsRunMetadata(self):
+    run_options = config_pb2.RunOptions(
+        trace_level=config_pb2.RunOptions.FULL_TRACE)
+    run_metadata = config_pb2.RunMetadata()
+
+    with ops.device('/cpu:0'):
+      with session.Session() as sess:
+        # all combinations are valid
+        sess.run(constant_op.constant(1.0), options=None, run_metadata=None)
+        sess.run(constant_op.constant(1.0), options=None,
+                 run_metadata=run_metadata)
+        self.assertTrue(not run_metadata.HasField('step_stats'))
+
+        sess.run(constant_op.constant(1.0), options=run_options,
+                 run_metadata=None)
+        self.assertTrue(not run_metadata.HasField('step_stats'))
+
+        sess.run(constant_op.constant(1.0), options=run_options,
+                 run_metadata=run_metadata)
+
+        self.assertTrue(run_metadata.HasField('step_stats'))
+        self.assertEquals(len(run_metadata.step_stats.dev_stats), 1)
+
+  def testFeedShapeCompatibility(self):
+    with session.Session() as sess:
+      some_tensor = constant_op.constant([2.0, 2.0, 2.0, 2.0])
+      new_shape = constant_op.constant([2, 2])
+      reshaped_tensor = array_ops.reshape(some_tensor, new_shape)
+
+      with self.assertRaisesRegexp(ValueError, 'Cannot feed value of shape'):
+        sess.run(reshaped_tensor, feed_dict={some_tensor: [1.0, 2.0, 3.0]})
+
+      with self.assertRaisesRegexp(ValueError, 'may not be fed'):
+        sess.run(reshaped_tensor, feed_dict={new_shape: [3, 7]})
+
+  def testRunWithNoTargetsIsAnError(self):
+    with session.Session() as sess:
+      _ = constant_op.constant(5.0)
+      with self.assertRaisesRegexp(
+          errors.InvalidArgumentError,
+          'Must specify at least one target to fetch or execute.'):
+        sess.run([])
+
+  def testInferShapesFalse(self):
+    with ops.Graph().as_default(), ops.device('/cpu:0'):
+      a = constant_op.constant([[1, 2]])
+      sess = session.Session()
+      self.assertFalse('_output_shapes' in sess.graph_def.node[0].attr)
+      # Avoid lint error regarding 'unused' var a.
+      self.assertTrue(a == a)
+
+  def testInferShapesTrue(self):
+    config = config_pb2.ConfigProto(
+        graph_options=config_pb2.GraphOptions(infer_shapes=True))
+    with ops.Graph().as_default(), ops.device('/cpu:0'):
+      a = constant_op.constant([[1, 2]])
+      sess = session.Session(config=config)
+      self.assertTrue('_output_shapes' in sess.graph_def.node[0].attr)
+      # Avoid lint error regarding 'unused' var a.
+      self.assertTrue(a == a)
+
+  def testBuildCostModel(self):
+    run_options = config_pb2.RunOptions()
+    config = config_pb2.ConfigProto(
+        allow_soft_placement=True,
+        graph_options=config_pb2.GraphOptions(build_cost_model=100))
+    with session.Session(config=config) as sess:
+      with ops.device('/gpu:0'):
+        a = array_ops.placeholder(dtypes.float32, shape=[])
+        b = math_ops.add(a, a)
+        c = array_ops.identity(b)
+        d = math_ops.mul(c, c)
+      for step in xrange(120):
+        run_metadata = config_pb2.RunMetadata()
+        sess.run(d, feed_dict={a: 1.0},
+                 options=run_options, run_metadata=run_metadata)
+        if step == 99:
+          self.assertTrue(run_metadata.HasField('cost_graph'))
+        else:
+          self.assertFalse(run_metadata.HasField('cost_graph'))
+
+  def testNonInteractiveSessionNesting(self):
+    sess1 = session.Session()
+    sess1_controller = sess1.as_default()
+    sess1_controller.__enter__()
+
+    sess2 = session.Session()
+    sess2_controller = sess2.as_default()
+    sess2_controller.__enter__()
+
+    with self.assertRaisesRegexp(AssertionError, 'Nesting violated'):
+      sess1_controller.__exit__(None, None, None)
+
+    ops._default_session_stack.reset()
+
+  def testInteractiveSessionNesting(self):
+    sess1 = session.InteractiveSession()
+    sess2 = session.InteractiveSession()
+    del sess1
+    del sess2
+
 
 if __name__ == '__main__':
   googletest.main()

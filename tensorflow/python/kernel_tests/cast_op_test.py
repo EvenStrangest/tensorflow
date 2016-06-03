@@ -1,4 +1,4 @@
-# Copyright 2015 Google Inc. All Rights Reserved.
+# Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -156,7 +156,7 @@ class CastOpTest(tf.test.TestCase):
           x = tf.constant(1.0, src_t)
           z = tf.identity(x)
           y = tf.cast(z, dst_t)
-          err = tf.test.compute_gradient_error(x, [1], y, [1])
+          err = tf.test.compute_gradient_error(x, [], y, [])
           self.assertLess(err, 1e-3)
 
 

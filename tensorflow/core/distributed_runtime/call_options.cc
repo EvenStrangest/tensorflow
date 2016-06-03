@@ -1,4 +1,4 @@
-/* Copyright 2016 Google Inc. All Rights Reserved.
+/* Copyright 2016 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -39,6 +39,16 @@ void CallOptions::SetCancelCallback(CancelFunction cancel_func) {
 void CallOptions::ClearCancelCallback() {
   mutex_lock l(mu_);
   cancel_func_ = nullptr;
+}
+
+int64 CallOptions::GetTimeout() {
+  mutex_lock l(mu_);
+  return timeout_in_ms_;
+}
+
+void CallOptions::SetTimeout(int64 ms) {
+  mutex_lock l(mu_);
+  timeout_in_ms_ = ms;
 }
 
 }  // end namespace tensorflow

@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,7 +20,6 @@ limitations under the License.
 #include "tensorflow/core/framework/tensor.h"
 
 #if GOOGLE_CUDA
-#include "tensorflow/core/common_runtime/gpu_device_context.h"
 #include "tensorflow/core/kernels/conv_2d.h"
 #include "tensorflow/core/kernels/maxpooling_op_gpu.h"
 #include "tensorflow/core/kernels/pooling_ops_common_gpu.h"
@@ -154,9 +153,9 @@ void DnnPoolingOp<T>::Compute(
                                 ShapeFromFormat(FORMAT_NCHW, tensor_in.shape(),
                                                 data_format),
                                 &transformed_input));
-    functor::NHWCToNCHW<GPUDevice, T>()(context->eigen_device<Device>(),
-                                        tensor_in.tensor<T, 4>(),
-                                        transformed_input.tensor<T, 4>());
+    functor::NHWCToNCHW<GPUDevice, T, 4>()(context->eigen_device<Device>(),
+                                           tensor_in.tensor<T, 4>(),
+                                           transformed_input.tensor<T, 4>());
   } else {
     transformed_input = tensor_in;
   }
@@ -201,7 +200,7 @@ void DnnPoolingOp<T>::Compute(
       AsDeviceMemory(transformed_output.template flat<T>().data(),
                      transformed_output.template flat<T>().size());
 
-  auto* stream = context->op_device_context<GPUDeviceContext>()->stream();
+  auto* stream = context->op_device_context()->stream();
   OP_REQUIRES(context, stream, errors::Internal("No GPU stream available."));
 
   bool status = stream
@@ -214,7 +213,7 @@ void DnnPoolingOp<T>::Compute(
   if (data_format == FORMAT_NHWC) {
     /// Transform the output data from NCHW back to NHWC
     auto toConstTensor = [](const Tensor& x) -> const Tensor { return x; };
-    functor::NCHWToNHWC<GPUDevice, T>()(
+    functor::NCHWToNHWC<GPUDevice, T, 4>()(
         context->eigen_device<Device>(),
         toConstTensor(transformed_output).template tensor<T, 4>(),
         tensor_out->tensor<T, 4>());
@@ -293,19 +292,19 @@ void DnnPoolingGradOp<T>::Compute(
       // For AvgPoolGrad, the original input tensor is not necessary. However,
       // cudnn still requires them to run, although they do not affect the
       // results.
-      functor::NHWCToNCHW<GPUDevice, T>()(context->eigen_device<Device>(),
-                                          tensor_in->tensor<T, 4>(),
-                                          transformed_input.tensor<T, 4>());
+      functor::NHWCToNCHW<GPUDevice, T, 4>()(context->eigen_device<Device>(),
+                                             tensor_in->tensor<T, 4>(),
+                                             transformed_input.tensor<T, 4>());
     }
     if (tensor_out) {
       // For AvgPoolGrad, the original output tensor is not necessary. However,
       // cudnn still requires them to run, although they do not affect the
       // results.
-      functor::NHWCToNCHW<GPUDevice, T>()(context->eigen_device<Device>(),
-                                          tensor_out->tensor<T, 4>(),
-                                          transformed_output.tensor<T, 4>());
+      functor::NHWCToNCHW<GPUDevice, T, 4>()(context->eigen_device<Device>(),
+                                             tensor_out->tensor<T, 4>(),
+                                             transformed_output.tensor<T, 4>());
     }
-    functor::NHWCToNCHW<GPUDevice, T>()(
+    functor::NHWCToNCHW<GPUDevice, T, 4>()(
         context->eigen_device<Device>(), out_backprop.tensor<T, 4>(),
         transformed_output_backprop.tensor<T, 4>());
   }
@@ -347,7 +346,7 @@ void DnnPoolingGradOp<T>::Compute(
       AsDeviceMemory(transformed_input_backprop.template flat<T>().data(),
                      transformed_input_backprop.template flat<T>().size());
 
-  auto* stream = context->op_device_context<GPUDeviceContext>()->stream();
+  auto* stream = context->op_device_context()->stream();
   OP_REQUIRES(context, stream, errors::Internal("No GPU stream available."));
 
   bool status =
@@ -362,7 +361,7 @@ void DnnPoolingGradOp<T>::Compute(
   if (data_format == FORMAT_NHWC) {
     /// Transform the output data from NCHW back to NHWC.
     auto toConstTensor = [](const Tensor& x) -> const Tensor { return x; };
-    functor::NCHWToNHWC<GPUDevice, T>()(
+    functor::NCHWToNHWC<GPUDevice, T, 4>()(
         context->eigen_device<Device>(),
         toConstTensor(transformed_input_backprop).template tensor<T, 4>(),
         input_backprop->tensor<T, 4>());

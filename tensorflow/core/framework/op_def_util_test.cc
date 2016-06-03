@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -246,6 +246,10 @@ TEST_F(ValidateOpDefTest, BadAttrAllowed) {
       TestBuilder(OpDefBuilder("BadAttrtude")
                       .Attr("x: list(realnumbertype) = [DT_COMPLEX64]")),
       "attr 'x' of complex64 is not in the list of allowed values");
+  ExpectFailure(
+      TestBuilder(OpDefBuilder("BadAttrtude")
+                      .Attr("x: list(realnumbertype) = [DT_COMPLEX128]")),
+      "attr 'x' of complex128 is not in the list of allowed values");
   // Is in list of allowed strings.
   TF_EXPECT_OK(TestBuilder(
       OpDefBuilder("GoodAttrtude").Attr("x: {'foo', 'bar'} = 'bar'")));

@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -42,6 +42,7 @@ namespace tensorflow {
 class Device;
 class Env;
 class EventMgr;
+class OpKernelContext;
 class ResourceMgr;
 
 namespace thread {
@@ -170,7 +171,8 @@ class DeviceBase {
 
   // This is overridden by GPU devices to reinitialize the derived
   // type returned by MakeGpuDevice.
-  virtual void ReinitializeGpuDevice(PerOpGpuDevice* /*device*/,
+  virtual void ReinitializeGpuDevice(OpKernelContext* /*context*/,
+                                     PerOpGpuDevice* /*device*/,
                                      DeviceContext* /*dc*/,
                                      Allocator* /*allocator*/) {}
 

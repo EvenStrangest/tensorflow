@@ -1,4 +1,4 @@
-/* Copyright 2016 Google Inc. All Rights Reserved.
+/* Copyright 2016 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -25,11 +25,15 @@ class AsyncServiceInterface {
   virtual ~AsyncServiceInterface() {}
 
   // A blocking method that should be called to handle incoming RPCs.
-  // This method will block until the service is shutdown, which
-  // depends on the implementation of the service.
+  // This method will block until the service shuts down.
   virtual void HandleRPCsLoop() = 0;
 
-  // TODO(mrry): Add a clean shutdown method?
+  // Starts shutting down this service.
+  //
+  // NOTE(mrry): To shut down this service completely, the caller must
+  // also shut down any servers that might share ownership of this
+  // service's resources (e.g. completion queues).
+  virtual void Shutdown() = 0;
 };
 
 }  // namespace tensorflow
