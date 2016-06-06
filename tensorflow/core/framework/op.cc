@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -176,9 +176,10 @@ const OpDef* OpListOpRegistry::LookUp(const string& op_type_name,
 // Other registration ---------------------------------------------------------
 
 namespace register_op {
-OpDefBuilderReceiver::OpDefBuilderReceiver(const OpDefBuilder& builder) {
+OpDefBuilderReceiver::OpDefBuilderReceiver(
+    const OpDefBuilderWrapper<true>& wrapper) {
   OpDef op_def;
-  builder.Finalize(&op_def);
+  wrapper.builder().Finalize(&op_def);
   OpRegistry::Global()->Register(op_def);
 }
 }  // namespace register_op

@@ -1,4 +1,4 @@
-# Copyright 2016 Google Inc. All Rights Reserved.
+# Copyright 2016 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -43,6 +43,7 @@ except ImportError as e:
 from google.protobuf import text_format
 from tensorflow.core.util import test_log_pb2
 from tensorflow.tools.test import run_and_gather_logs_lib
+
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -92,7 +93,7 @@ def main(unused_args):
   else:
     output_path = os.path.abspath(FLAGS.test_log_output)
   tf.gfile.GFile(output_path, "w").write(serialized_test_results)
-  print("Test results written to: %s" % output_path)
+  tf.logging.info("Test results written to: %s" % output_path)
 
 
 if __name__ == "__main__":

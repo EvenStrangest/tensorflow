@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -21,6 +21,8 @@ limitations under the License.
 #include "tensorflow/core/common_runtime/device.h"
 #include "tensorflow/core/common_runtime/executor.h"
 #include "tensorflow/core/common_runtime/graph_optimizer.h"
+#include "tensorflow/core/common_runtime/memory_types.h"
+#include "tensorflow/core/common_runtime/rendezvous_mgr.h"
 #include "tensorflow/core/framework/function.h"
 #include "tensorflow/core/framework/node_def_util.h"
 #include "tensorflow/core/framework/op.h"
@@ -39,6 +41,8 @@ static const char* const kArgOp = "_Arg";
 static const char* const kRetOp = "_Retval";
 static const char* const kGradientOp = "SymbolicGradient";
 static const char* const kNodeLabel = "Func";
+static const char* const kFuncAttr = "f";
+static const char* const kNoinlineAttr = "noinline";
 
 // Represents the index-th output of a node.
 struct Endpoint {
@@ -153,9 +157,6 @@ class ArgOp : public OpKernel {
   TF_DISALLOW_COPY_AND_ASSIGN(ArgOp);
 };
 
-REGISTER_KERNEL_BUILDER(Name("_Arg").Device(DEVICE_CPU), ArgOp);
-REGISTER_KERNEL_BUILDER(Name("_Arg").Device(DEVICE_GPU), ArgOp);
-
 class RetvalOp : public OpKernel {
  public:
   explicit RetvalOp(OpKernelConstruction* ctx) : OpKernel(ctx) {
@@ -181,8 +182,29 @@ class RetvalOp : public OpKernel {
   TF_DISALLOW_COPY_AND_ASSIGN(RetvalOp);
 };
 
+REGISTER_KERNEL_BUILDER(Name("_Arg").Device(DEVICE_CPU), ArgOp);
 REGISTER_KERNEL_BUILDER(Name("_Retval").Device(DEVICE_CPU), RetvalOp);
-REGISTER_KERNEL_BUILDER(Name("_Retval").Device(DEVICE_GPU), RetvalOp);
+
+#define REGISTER_GPU_KERNELS(type)                                       \
+  REGISTER_KERNEL_BUILDER(                                               \
+      Name("_Arg").Device(DEVICE_GPU).TypeConstraint<type>("T"), ArgOp); \
+  REGISTER_KERNEL_BUILDER(                                               \
+      Name("_Retval").Device(DEVICE_GPU).TypeConstraint<type>("T"), RetvalOp);
+REGISTER_GPU_KERNELS(Eigen::half);
+REGISTER_GPU_KERNELS(float);
+REGISTER_GPU_KERNELS(double);
+#undef REGISTER_GPU_KERNELS
+
+REGISTER_KERNEL_BUILDER(Name("_Arg")
+                            .Device(DEVICE_GPU)
+                            .HostMemory("output")
+                            .TypeConstraint<int32>("T"),
+                        ArgOp);
+REGISTER_KERNEL_BUILDER(Name("_Retval")
+                            .Device(DEVICE_GPU)
+                            .HostMemory("input")
+                            .TypeConstraint<int32>("T"),
+                        RetvalOp);
 
 class PassOn : public OpKernel {
  public:
@@ -206,7 +228,7 @@ static const FunctionLibraryRuntime::Handle kInvalidHandle = -1;
 
 class FunctionLibraryRuntimeImpl : public FunctionLibraryRuntime {
  public:
-  FunctionLibraryRuntimeImpl(Device* device, Runner runner,
+  FunctionLibraryRuntimeImpl(const DeviceMgr* dmgr, Device* device,
                              int graph_def_version,
                              const FunctionLibraryDefinition* lib_def,
                              const OptimizerOptions& optimizer_options);
@@ -226,11 +248,13 @@ class FunctionLibraryRuntimeImpl : public FunctionLibraryRuntime {
 
   bool IsStateful(const string& function) override;
 
+  Device* device() override { return device_; }
+
  private:
   typedef FunctionLibraryRuntimeImpl ME;
 
+  const DeviceMgr* const device_mgr_;
   Device* const device_;
-  Runner runner_ = nullptr;
   const int graph_def_version_;
   const FunctionLibraryDefinition* const lib_def_;
   GraphOptimizer optimizer_;
@@ -261,18 +285,18 @@ class FunctionLibraryRuntimeImpl : public FunctionLibraryRuntime {
                            FunctionBody** fbody);
   Status CreateItem(Handle handle, Item** item);
   Status GetOrCreateItem(Handle handle, Item** item);
-  Status InstantiateSymbolicGradient(const InstantiateAttrValueMap& attrs,
+  Status InstantiateSymbolicGradient(const NameAttrList& func,
                                      FunctionBody** g_body);
 
   TF_DISALLOW_COPY_AND_ASSIGN(FunctionLibraryRuntimeImpl);
 };
 
 FunctionLibraryRuntimeImpl::FunctionLibraryRuntimeImpl(
-    Device* device, Runner runner, int graph_def_version,
+    const DeviceMgr* dmgr, Device* device, int graph_def_version,
     const FunctionLibraryDefinition* lib_def,
     const OptimizerOptions& optimizer_options)
-    : device_(device),
-      runner_(runner),
+    : device_mgr_(dmgr),
+      device_(device),
       graph_def_version_(graph_def_version),
       lib_def_(lib_def),
       optimizer_(optimizer_options) {
@@ -308,6 +332,7 @@ class CallOp : public AsyncOpKernel {
                       done);
     FunctionLibraryRuntime::Options opts;
     opts.step_id = ctx->step_id();
+    opts.runner = ctx->runner();
     std::vector<Tensor> args;
     args.reserve(ctx->num_inputs());
     for (int i = 0; i < ctx->num_inputs(); ++i) {
@@ -353,6 +378,7 @@ class SymbolicGradientOp : public AsyncOpKernel {
 
     FunctionLibraryRuntime::Options opts;
     opts.step_id = ctx->step_id();
+    opts.runner = ctx->runner();
     std::vector<Tensor> args;
     args.reserve(ctx->num_inputs());
     for (int i = 0; i < ctx->num_inputs(); ++i) {
@@ -363,8 +389,12 @@ class SymbolicGradientOp : public AsyncOpKernel {
              [ctx, done, rets](const Status& status) {
                if (!status.ok()) {
                  ctx->SetStatus(status);
+               } else if (rets->size() != ctx->num_outputs()) {
+                 ctx->SetStatus(errors::InvalidArgument(
+                     "SymGrad expects to return ", ctx->num_outputs(),
+                     " tensor(s), but get ", rets->size(),
+                     " tensor(s) instead."));
                } else {
-                 CHECK_EQ(rets->size(), ctx->num_outputs());
                  for (size_t i = 0; i < rets->size(); ++i) {
                    ctx->set_output(i, (*rets)[i]);
                  }
@@ -455,12 +485,7 @@ Status FunctionLibraryRuntimeImpl::FunctionDefToBody(
 }
 
 Status FunctionLibraryRuntimeImpl::InstantiateSymbolicGradient(
-    const InstantiateAttrValueMap& attrs, FunctionBody** g_body) {
-  const AttrValue* f = gtl::FindOrNull(attrs, "f");
-  if (f == nullptr) {
-    return errors::InvalidArgument("SymbolicGradient is missing attr: f");
-  }
-  const auto& func = f->func();
+    const NameAttrList& func, FunctionBody** g_body) {
   const FunctionDef* fdef = lib_def_->Find(func.name());
   if (fdef == nullptr) {
     // f is a primitive op.
@@ -499,7 +524,19 @@ Status FunctionLibraryRuntimeImpl::Instantiate(
   Status s;
   FunctionBody* fbody = nullptr;
   if (function_name == kGradientOp) {
-    TF_RETURN_IF_ERROR(InstantiateSymbolicGradient(attrs, &fbody));
+    const AttrValue* f = gtl::FindOrNull(attrs, kFuncAttr);
+    if (f == nullptr) {
+      return errors::InvalidArgument("SymbolicGradient is missing attr: f");
+    }
+    const auto& func = f->func();
+    if (func.name() == kGradientOp) {
+      return errors::InvalidArgument("Can't take gradient of SymbolicGradient");
+    }
+    const string grad = lib_def_->FindGradient(func.name());
+    if (!grad.empty()) {
+      return Instantiate(grad, func.attr(), handle);
+    }
+    TF_RETURN_IF_ERROR(InstantiateSymbolicGradient(func, &fbody));
   } else {
     const FunctionDef* fdef = lib_def_->Find(function_name);
     if (fdef == nullptr) {
@@ -540,7 +577,7 @@ void OptimizeGraph(FunctionLibraryRuntime* lib, Graph** g) {
   opts.set_do_function_inlining(true);
   opts.set_do_constant_folding(true);
   GraphOptimizer optimizer(opts);
-  optimizer.Optimize(lib, g);
+  optimizer.Optimize(lib, lib->device(), g);
 }
 
 Status FunctionLibraryRuntimeImpl::CreateItem(Handle handle, Item** item) {
@@ -549,7 +586,13 @@ Status FunctionLibraryRuntimeImpl::CreateItem(Handle handle, Item** item) {
   Graph* g = new Graph(lib_def_);
   CopyGraph(*fbody->graph, g);
 
-  optimizer_.Optimize(this, &g);
+  optimizer_.Optimize(this, device(), &g);
+  auto s = EnsureMemoryTypes(DeviceType(device()->device_type()),
+                             device()->name(), g);
+  if (!s.ok()) {
+    delete g;
+    return Status::OK();
+  }
 
   // Creates an executor based on the g.  This must be done without
   // holding mu_ because create_kernel_ calls back into the library.
@@ -617,18 +660,25 @@ void FunctionLibraryRuntimeImpl::Run(const Options& opts, Handle handle,
     delete frame;
     return done(s);
   }
+  DCHECK(opts.runner != nullptr);
+
   Executor::Args exec_args;
   // Inherit the step_id from the caller.
   exec_args.step_id = opts.step_id;
   exec_args.call_frame = frame;
   exec_args.cancellation_manager = opts.cancellation_manager;
-  exec_args.runner = runner_;
+  exec_args.runner = *opts.runner;
+  // TODO(zhifengc): we can avoid creating rendez here if we know
+  // there is no send/recv nodes in the graph.
+  auto* rendez = new IntraProcessRendezvous(device_mgr_);
+  exec_args.rendezvous = rendez;
   item->exec->RunAsync(
       // Executor args
       exec_args,
       // Done callback.
-      [item, frame, rets, done](const Status& status) {
+      [item, frame, rets, rendez, done](const Status& status) {
         item->Unref();
+        rendez->Unref();
         Status s = status;
         if (s.ok()) {
           s = frame->GetRetvals(rets);
@@ -645,46 +695,23 @@ bool FunctionLibraryRuntimeImpl::IsStateful(const string& func) {
 }
 
 FunctionLibraryRuntime* NewFunctionLibraryRuntime(
-    Device* device, Runner runner, int graph_def_version,
+    const DeviceMgr* dmgr, Device* device, int graph_def_version,
     const FunctionLibraryDefinition* lib_def,
     const OptimizerOptions& optimizer_options) {
-  return new FunctionLibraryRuntimeImpl(device, runner, graph_def_version,
+  return new FunctionLibraryRuntimeImpl(dmgr, device, graph_def_version,
                                         lib_def, optimizer_options);
 }
 
 bool RemoveDeadNodes(Graph* g) {
   VLOG(2) << "Removing dead nodes";
-  std::vector<bool> visited(g->num_node_ids(), false);
-  std::deque<Node*> q;
+  std::unordered_set<const Node*> nodes;
   for (auto n : g->nodes()) {
     if (n->IsSource() || n->IsSink() || n->IsControlFlow() ||
         n->op_def().is_stateful()) {
-      q.push_back(n);
-      visited[n->id()] = true;
+      nodes.insert(n);
     }
   }
-  while (!q.empty()) {
-    const Node* n = q.front();
-    q.pop_front();
-    for (auto e : n->in_edges()) {
-      Node* p = e->src();
-      if (!visited[p->id()]) {
-        q.push_back(p);
-        visited[p->id()] = true;
-      }
-    }
-  }
-  bool removed_any = false;
-  for (std::size_t i = 0; i < visited.size(); ++i) {
-    if (!visited[i]) {
-      Node* n = g->FindNodeId(i);
-      if (n) {
-        g->RemoveNode(n);
-        removed_any = true;
-      }
-    }
-  }
-  return removed_any;
+  return PruneForReverseReachability(g, std::move(nodes));
 }
 
 namespace {
@@ -977,10 +1004,49 @@ static void InlineFunctionBody(Graph* g, Node* caller,
   g->RemoveNode(caller);  // 'caller' is replaced with inlined nodes.
 }
 
+// Given a node's NodeDef, returns false iff the node explicitly
+// specified noinline. This gives ExpandInlineFunctions a heuristic to
+// decide whether to inline the function.
+bool ShouldInline(const NodeDef& ndef) {
+  bool noinline = false;
+  if (GetNodeAttr(ndef, kNoinlineAttr, &noinline).ok()) {
+    // If the node specifies attribute 'noinlne', returns accordingly.
+    return !noinline;
+  }
+  if (ndef.op() != kGradientOp) {
+    // If the op is not SymbolicGradient, we should be free to decide
+    // whether to inline or not.
+    return true;
+  }
+  // If the node is a SymbolicGradient, we use the forward
+  // function's attribute 'noinline' instead.
+  const NameAttrList* forward_func_attrs;
+  Status s =
+      GetNodeAttr(AttrSlice(&ndef.attr()), kFuncAttr, &forward_func_attrs);
+  if (!s.ok()) {
+    // The node def is malformed (missing attribute 'f'), we'll just
+    // continue and the runtime will error out.
+    return false;
+  }
+  s = GetNodeAttr(AttrSlice(&forward_func_attrs->attr()), kNoinlineAttr,
+                  &noinline);
+  if (!s.ok()) {
+    // The forward function doesn't specify 'noinline' attr, we should
+    // be free to decide.
+    return true;
+  }
+  // Otherwise, make inline decision according to the attr.
+  return !noinline;
+}
+
 bool ExpandInlineFunctions(FunctionLibraryRuntime* lib, Graph* graph) {
   std::vector<std::pair<Node*, const FunctionBody*>> candidates;
   for (Node* node : graph->nodes()) {
     VLOG(3) << "Expanding " << node->DebugString();
+    if (!ShouldInline(node->def())) {
+      VLOG(3) << "noinline: " << node->DebugString();
+      continue;
+    }
     FunctionLibraryRuntime::Handle handle;
     Status s =
         lib->Instantiate(node->type_string(), node->def().attr(), &handle);
@@ -1170,37 +1236,44 @@ FunctionBody* SymbolicGradientHelper::Compute() {
   Copy();
 
   Graph* g = gbody_->graph;
+
+  const int num_y = gbody_->ret_nodes.size();
+
+  // Populate 'y_node_outputs_' with node function body outputs.
   // Populate 'y_grad_nodes' with initial gradient nodes for each return node of
   // the original function body (these will be 'arg' nodes in the function
   // gradient body).
-  const int num_y = gbody_->ret_nodes.size();
-  std::vector<Node*> y_grad_nodes;
-  y_grad_nodes.reserve(num_y);
+  std::vector<NodeOut> y_node_outputs;
+  y_node_outputs.reserve(num_y);
+  std::vector<NodeOut> y_grad_node_outputs;
+  y_grad_node_outputs.reserve(num_y);
   for (int i = 0; i < num_y; ++i) {
     Node* y = gbody_->ret_nodes[i];
+    y_node_outputs.push_back({y, 0});
     DCHECK_EQ(y->type_string(), kRetOp);
     const DataType dtype = y->input_type(0);
     const int index = gbody_->arg_nodes.size();
     Node* dy = AddArg(g, dtype, index);
     gbody_->arg_types.push_back(dtype);
     gbody_->arg_nodes.push_back(dy);
-    y_grad_nodes.push_back(dy);
+    y_grad_node_outputs.push_back({dy, 0});
   }
 
-  // Populate 'x_nodes' with function args (not including 'y_grad_nodes').
+  // Populate 'x_nodes' with function args (excluding 'y_grad_node_outputs').
   const int num_x = fbody_->arg_nodes.size();
-  std::vector<Node*> x_nodes;
-  x_nodes.reserve(num_x);
+  std::vector<NodeOut> x_node_outputs;
+  x_node_outputs.reserve(num_x);
   for (size_t i = 0; i < fbody_->arg_nodes.size(); ++i) {
-    x_nodes.push_back(gbody_->arg_nodes[i]);
+    x_node_outputs.push_back({gbody_->arg_nodes[i], 0});
   }
 
   // Call AddSymbolicGradients which will add nodes to graph 'g' that
-  // compute the function gradient (adding an entry in 'x_grad_nodes' for
-  // each node in 'x_nodes').
-  std::vector<GradNodeOutput> x_grad_nodes(x_nodes.size());
-  TF_CHECK_OK(AddSymbolicGradients(gbody_->ret_nodes, x_nodes, y_grad_nodes,
-                                   &x_grad_nodes, g));
+  // compute the function gradient (adding an entry in 'x_grad_node_outputs' for
+  // each node in 'x_node_outputs').
+  std::vector<NodeOut> x_grad_node_outputs;
+  TF_CHECK_OK(AddSymbolicGradients(y_node_outputs, x_node_outputs,
+                                   y_grad_node_outputs, &x_grad_node_outputs,
+                                   g));
 
   // Remove the old return nodes from the function body.
   for (Node* n : gbody_->ret_nodes) {
@@ -1211,7 +1284,7 @@ FunctionBody* SymbolicGradientHelper::Compute() {
   // Add new return nodes to the function gradient body for each node
   // in 'x_grad_nodes'.
   for (size_t i = 0; i < fbody_->arg_types.size(); ++i) {
-    Endpoint grad = {x_grad_nodes[i].node, x_grad_nodes[i].index};
+    Endpoint grad = {x_grad_node_outputs[i].node, x_grad_node_outputs[i].index};
     Node* ret = AddRet(g, grad, i);
     gbody_->ret_nodes.push_back(ret);
   }

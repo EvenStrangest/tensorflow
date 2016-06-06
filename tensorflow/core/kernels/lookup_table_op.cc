@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -69,7 +69,11 @@ class HashTable : public InitializableLookupTable {
  public:
   size_t size() const override {
     // return the size of the table only if it's initialized, otherwise 0.
-    return table_ && is_initialized_ ? table_->size() : 0;
+    if (!is_initialized_) {
+      return 0;
+    }
+    std::atomic_thread_fence(std::memory_order_acquire);
+    return table_ ? table_->size() : 0;
   }
 
   DataType key_dtype() const override { return DataTypeToEnum<K>::v(); }

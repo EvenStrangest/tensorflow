@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "tensorflow/core/common_runtime/gpu/gpu_allocator_retry.h"
+#include "tensorflow/core/common_runtime/allocator_retry.h"
 
 #include <vector>
 #include "tensorflow/core/lib/core/notification.h"
@@ -55,7 +55,7 @@ class FakeAllocator {
   }
 
  private:
-  GPUAllocatorRetry retry_;
+  AllocatorRetry retry_;
   void* good_ptr_ = reinterpret_cast<void*>(0xdeadbeef);
   mutex mu_;
   size_t memory_capacity_ GUARDED_BY(mu_);
@@ -81,6 +81,9 @@ class GPUAllocatorRetryTest : public ::testing::Test {
                   return;
                 }
               }
+              // Failures are more likely to occur if each consumer
+              // delays for a while before returning the memory.
+              Env::Default()->SleepForMicroseconds(500);
               ++consumer_count_[i];
               for (int j = 0; j < cap_needed; ++j) {
                 alloc_->DeallocateRaw(ptr);
@@ -142,7 +145,9 @@ TEST_F(GPUAllocatorRetryTest, RetrySuccess) {
 }
 
 // Verifies OutOfMemory failure when memory is slightly overcommitted
-// and retry is not allowed.
+// and retry is not allowed.  Note that this test will fail, i.e. no
+// memory alloc failure will be detected, if it is run in a context that
+// does not permit real multi-threaded execution.
 TEST_F(GPUAllocatorRetryTest, NoRetryFail) {
   // Support up to 2 allocations simultaneously, waits up to 0 msec for
   // a chance to alloc.

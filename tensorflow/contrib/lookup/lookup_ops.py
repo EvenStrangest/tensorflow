@@ -1,4 +1,4 @@
-# Copyright 2016 Google Inc. All Rights Reserved.
+# Copyright 2016 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -391,7 +391,7 @@ def index_to_string(tensor, mapping, default_value="UNK", name=None):
   ```
 
   Args:
-    indices: A `int64` `Tensor` with the indices to map to strings.
+    tensor: A `int64` `Tensor` with the indices to map to strings.
     mapping: A 1-D string `Tensor` that specifies the strings to map from
       indices.
     default_value: The string value to use for out-of-vocabulary indices.

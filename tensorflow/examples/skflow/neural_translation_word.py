@@ -1,6 +1,6 @@
 # encoding: utf-8
 
-#  Copyright 2015-present Scikit Flow Authors. All Rights Reserved.
+#  Copyright 2015-present The Scikit Flow Authors. All Rights Reserved.
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
 #  you may not use this file except in compliance with the License.
@@ -13,8 +13,9 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
-
-from __future__ import division, print_function, absolute_import
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
 import cPickle
 import itertools
@@ -24,7 +25,7 @@ import random
 import numpy as np
 import tensorflow as tf
 
-import skflow
+from tensorflow.contrib import learn
 
 # Get training data
 
@@ -92,9 +93,9 @@ X_test, y_test = Xy(read_iterator('test.data'))
 MAX_DOCUMENT_LENGTH = 10
 
 if not (os.path.exists('en.vocab') and os.path.exists('fr.vocab')):
-    X_vocab_processor = skflow.preprocessing.VocabularyProcessor(MAX_DOCUMENT_LENGTH,
+    X_vocab_processor = learn.preprocessing.VocabularyProcessor(MAX_DOCUMENT_LENGTH,
         min_frequency=5)
-    y_vocab_processor = skflow.preprocessing.VocabularyProcessor(MAX_DOCUMENT_LENGTH,
+    y_vocab_processor = learn.preprocessing.VocabularyProcessor(MAX_DOCUMENT_LENGTH,
         min_frequency=5)
     Xtrainff, ytrainff = Xy(read_iterator('train.data'))
     print('Fitting dictionary for English...')
@@ -125,24 +126,24 @@ HIDDEN_SIZE = 20
 EMBEDDING_SIZE = 20
 
 def translate_model(X, y):
-    word_vectors = skflow.ops.categorical_variable(X, n_classes=n_en_words,
+    word_vectors = learn.ops.categorical_variable(X, n_classes=n_en_words,
         embedding_size=EMBEDDING_SIZE, name='words')
-    in_X, in_y, out_y = skflow.ops.seq2seq_inputs(
+    in_X, in_y, out_y = learn.ops.seq2seq_inputs(
         word_vectors, y, MAX_DOCUMENT_LENGTH, MAX_DOCUMENT_LENGTH)
     encoder_cell = tf.nn.rnn_cell.GRUCell(HIDDEN_SIZE)
     decoder_cell = tf.nn.rnn_cell.OutputProjectionWrapper(
         tf.nn.rnn_cell.GRUCell(HIDDEN_SIZE), n_fr_words)
-    decoding, _, sampling_decoding, _ = skflow.ops.rnn_seq2seq(in_X, in_y,
+    decoding, _, sampling_decoding, _ = learn.ops.rnn_seq2seq(in_X, in_y,
         encoder_cell, decoder_cell=decoder_cell)
-    return skflow.ops.sequence_classifier(decoding, out_y, sampling_decoding)
+    return learn.ops.sequence_classifier(decoding, out_y, sampling_decoding)
 
 
 PATH = '/tmp/tf_examples/ntm_words/'
 
 if os.path.exists(os.path.join(PATH, 'graph.pbtxt')):
-    translator = skflow.TensorFlowEstimator.restore(PATH)
+    translator = learn.TensorFlowEstimator.restore(PATH)
 else:
-    translator = skflow.TensorFlowEstimator(model_fn=translate_model,
+    translator = learn.TensorFlowEstimator(model_fn=translate_model,
         n_classes=n_fr_words,
         optimizer='Adam', learning_rate=0.01, batch_size=128,
         continue_training=True, steps=100)
@@ -153,7 +154,7 @@ while True:
 
     xpred, ygold = [], []
     for _ in range(10):
-        idx = random.randint(0, len(X_test))
+        idx = random.randint(0, len(X_test) - 1)
         xpred.append(X_test[idx])
         ygold.append(y_test[idx])
     xpred = np.array(xpred)
@@ -165,4 +166,3 @@ while True:
         print('English: %s. French (pred): %s, French (gold): %s' %
             (input_text, output_text, gold))
         print(inp_data, pred)
-

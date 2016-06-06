@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -284,6 +284,33 @@ bool StreamExecutor::SupportsRng() const {
 
 bool StreamExecutor::SupportsDnn() const {
   return implementation_->SupportsDnn();
+}
+
+bool StreamExecutor::GetConvolveAlgorithms(
+    std::vector<dnn::AlgorithmType> *out_algorithms) {
+  dnn::DnnSupport *dnn_support = AsDnn();
+  if (!dnn_support) {
+    return false;
+  }
+  return dnn_support->GetConvolveAlgorithms(out_algorithms);
+}
+
+bool StreamExecutor::GetConvolveBackwardDataAlgorithms(
+    std::vector<dnn::AlgorithmType> *out_algorithms) {
+  dnn::DnnSupport *dnn_support = AsDnn();
+  if (!dnn_support) {
+    return false;
+  }
+  return dnn_support->GetConvolveBackwardDataAlgorithms(out_algorithms);
+}
+
+bool StreamExecutor::GetConvolveBackwardFilterAlgorithms(
+    std::vector<dnn::AlgorithmType> *out_algorithms) {
+  dnn::DnnSupport *dnn_support = AsDnn();
+  if (!dnn_support) {
+    return false;
+  }
+  return dnn_support->GetConvolveBackwardFilterAlgorithms(out_algorithms);
 }
 
 dnn::DnnSupport *StreamExecutor::AsDnn() {

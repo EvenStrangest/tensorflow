@@ -1,4 +1,4 @@
-#  Copyright 2015-present Scikit Flow Authors. All Rights Reserved.
+#  Copyright 2016 The TensorFlow Authors. All Rights Reserved.
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
 #  you may not use this file except in compliance with the License.
@@ -11,12 +11,14 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
 from sklearn import datasets, metrics
 from sklearn.cross_validation import train_test_split
 
 import tensorflow as tf
-from tensorflow.contrib import skflow
 
 iris = datasets.load_iris()
 X_train, X_test, y_train, y_test = train_test_split(iris.data,
@@ -30,8 +32,9 @@ def exp_decay(global_step):
         decay_steps=100, decay_rate=0.001)
 
 # use customized decay function in learning_rate
-classifier = skflow.TensorFlowDNNClassifier(hidden_units=[10, 20, 10],
-                                            n_classes=3, steps=800,
-                                            learning_rate=exp_decay)
-classifier.fit(X_train, y_train)
+optimizer = tf.train.AdagradOptimizer(learning_rate=exp_decay)
+classifier = tf.contrib.learn.DNNClassifier(hidden_units=[10, 20, 10],
+                                            n_classes=3,
+                                            optimizer=optimizer)
+classifier.fit(X_train, y_train, steps=800)
 score = metrics.accuracy_score(y_test, classifier.predict(X_test))

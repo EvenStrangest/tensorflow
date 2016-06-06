@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -110,15 +110,16 @@ TEST_F(OpDefBuilderTest, AttrFailure) {
 
 TEST_F(OpDefBuilderTest, AttrWithRestrictions) {
   // Types with restrictions.
-  ExpectSuccess(b().Attr("a:numbertype"),
-                "attr: { name: 'a' type: 'type' allowed_values { list { type: "
-                "[DT_FLOAT, DT_DOUBLE, DT_INT64, DT_INT32, DT_UINT8, DT_INT16, "
-                "DT_UINT16, DT_INT8, DT_COMPLEX64, DT_COMPLEX128, DT_QINT8, DT_QUINT8, "
-                "DT_QINT32] } } }");
+  ExpectSuccess(
+      b().Attr("a:numbertype"),
+      "attr: { name: 'a' type: 'type' allowed_values { list { type: "
+      "[DT_HALF, DT_FLOAT, DT_DOUBLE, DT_INT64, DT_INT32, DT_UINT8, DT_INT16, "
+      "DT_UINT16, DT_INT8, DT_COMPLEX64, DT_COMPLEX128, DT_QINT8, DT_QUINT8, "
+      "DT_QINT32] } } }");
   ExpectSuccess(b().Attr("a:realnumbertype"),
                 "attr: { name: 'a' type: 'type' allowed_values { list { type: "
-                "[DT_FLOAT, DT_DOUBLE, DT_INT64, DT_INT32, DT_UINT8, DT_INT16, "
-                "DT_UINT16, DT_INT8] } } }");
+                "[DT_HALF, DT_FLOAT, DT_DOUBLE, DT_INT64, DT_INT32, DT_UINT8, "
+                "DT_INT16, DT_UINT16, DT_INT8] } } }");
   ExpectSuccess(b().Attr("a:quantizedtype"),
                 "attr: { name: 'a' type: 'type' allowed_values { list { type: "
                 "[DT_QINT8, DT_QUINT8, DT_QINT32, DT_QINT16, DT_QUINT16]} } }");
@@ -191,7 +192,7 @@ TEST_F(OpDefBuilderTest, AttrListOfRestricted) {
       b().Attr("a:list(realnumbertype)"),
       "attr: { name: 'a' type: 'list(type)' allowed_values { list { type: "
       "[DT_FLOAT, DT_DOUBLE, DT_INT64, DT_INT32, DT_UINT8, DT_INT16, "
-      "DT_UINT16, DT_INT8] } } }");
+      "DT_UINT16, DT_INT8, DT_HALF] } } }");
   ExpectSuccess(
       b().Attr("a:list(quantizedtype)"),
       "attr: { name: 'a' type: 'list(type)' allowed_values { list { type: "

@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -82,6 +82,8 @@ string DataTypeString(DataType dtype) {
       return "qint32";
     case DT_BFLOAT16:
       return "bfloat16";
+    case DT_HALF:
+      return "half";
     default:
       LOG(FATAL) << "Unrecognized DataType enum value " << dtype;
       return "";
@@ -154,6 +156,9 @@ bool DataTypeFromString(StringPiece sp, DataType* dt) {
   } else if (sp == "bfloat16") {
     *dt = DT_BFLOAT16;
     return true;
+  } else if (sp == "half" || sp == "float16") {
+    *dt = DT_HALF;
+    return true;
   }
   return false;
 }
@@ -170,17 +175,17 @@ string DataTypeSliceString(const DataTypeSlice types) {
 }
 
 DataTypeVector AllTypes() {
-  return {DT_FLOAT,  DT_DOUBLE, DT_INT32,   DT_UINT8,     DT_INT16,
-          DT_UINT16, DT_INT8,   DT_STRING,  DT_COMPLEX64, DT_COMPLEX128,
-          DT_INT64,  DT_BOOL,   DT_QINT8,   DT_QUINT8,    DT_QINT16,
-          DT_QUINT16, DT_QINT32};
+  return {DT_FLOAT,   DT_DOUBLE, DT_INT32,  DT_UINT8,     DT_INT16,
+          DT_UINT16,  DT_INT8,   DT_STRING, DT_COMPLEX64, DT_COMPLEX128,
+          DT_INT64,   DT_BOOL,   DT_QINT8,  DT_QUINT8,    DT_QINT16,
+          DT_QUINT16, DT_QINT32, DT_HALF};
 }
 
-#if !defined(__ANDROID__)
+#if !defined(__ANDROID__) || defined(SUPPORT_SELECTIVE_REGISTRATION)
 
 DataTypeVector RealNumberTypes() {
-  return {DT_FLOAT, DT_DOUBLE, DT_INT32, DT_INT64,
-          DT_UINT8, DT_INT16,  DT_INT8,  DT_UINT16};
+  return {DT_FLOAT, DT_DOUBLE, DT_INT32,  DT_INT64, DT_UINT8,
+          DT_INT16, DT_INT8,   DT_UINT16, DT_HALF};
 }
 
 DataTypeVector QuantizedTypes() {
@@ -188,18 +193,38 @@ DataTypeVector QuantizedTypes() {
 }
 
 DataTypeVector RealAndQuantizedTypes() {
-  return {DT_FLOAT,  DT_DOUBLE,  DT_INT32, DT_INT64, DT_UINT8,
-          DT_UINT16, DT_UINT16,  DT_INT8,  DT_QINT8, DT_QUINT8,
-          DT_QINT16, DT_QUINT16, DT_QINT32};
+  return {DT_FLOAT,  DT_DOUBLE,  DT_INT32,  DT_INT64, DT_UINT8,
+          DT_UINT16, DT_UINT16,  DT_INT8,   DT_QINT8, DT_QUINT8,
+          DT_QINT16, DT_QUINT16, DT_QINT32, DT_HALF};
 }
 
 DataTypeVector NumberTypes() {
-  return {DT_FLOAT,  DT_DOUBLE, DT_INT64, DT_INT32,     DT_UINT8,
-          DT_UINT16, DT_INT16,  DT_INT8,  DT_COMPLEX64, DT_COMPLEX128,
-          DT_QINT8,  DT_QUINT8, DT_QINT32 };
+  return {DT_FLOAT,  DT_DOUBLE, DT_INT64,  DT_INT32,     DT_UINT8,
+          DT_UINT16, DT_INT16,  DT_INT8,   DT_COMPLEX64, DT_COMPLEX128,
+          DT_QINT8,  DT_QUINT8, DT_QINT32, DT_HALF};
 }
 
-#else  // defined(__ANDROID__)
+#elif defined(__ANDROID_TYPES_FULL__)
+
+DataTypeVector RealNumberTypes() {
+  return {DT_FLOAT, DT_INT32, DT_INT64, DT_HALF};
+}
+
+DataTypeVector NumberTypes() {
+  return {DT_FLOAT,  DT_INT32,  DT_INT64, DT_QINT8,
+          DT_QUINT8, DT_QINT32, DT_HALF};
+}
+
+DataTypeVector QuantizedTypes() {
+  return {DT_QINT8, DT_QUINT8, DT_QINT16, DT_QUINT16, DT_QINT32};
+}
+
+DataTypeVector RealAndQuantizedTypes() {
+  return {DT_FLOAT,  DT_INT32,   DT_INT64,  DT_QINT8, DT_QUINT8,
+          DT_QINT16, DT_QUINT16, DT_QINT32, DT_HALF};
+}
+
+#else  // defined(__ANDROID__) && !defined(__ANDROID_TYPES_FULL__)
 
 DataTypeVector RealNumberTypes() { return {DT_FLOAT, DT_INT32}; }
 
@@ -239,6 +264,7 @@ bool DataTypeCanUseMemcpy(DataType dt) {
     case DT_QUINT16:
     case DT_QINT32:
     case DT_BFLOAT16:
+    case DT_HALF:
       return true;
     default:
       return false;
@@ -258,12 +284,27 @@ bool DataTypeIsQuantized(DataType dt) {
   }
 }
 
+bool DataTypeIsInteger(DataType dt) {
+  switch (dt) {
+    case DT_INT8:
+    case DT_UINT8:
+    case DT_INT16:
+    case DT_UINT16:
+    case DT_INT32:
+    case DT_INT64:
+      return true;
+    default:
+      return false;
+  }
+}
+
 int DataTypeSize(DataType dt) {
 #define CASE(T)                  \
   case DataTypeToEnum<T>::value: \
     return sizeof(T);
   switch (dt) {
     TF_CALL_POD_TYPES(CASE);
+    TF_CALL_QUANTIZED_TYPES(CASE);
     default:
       return 0;
   }

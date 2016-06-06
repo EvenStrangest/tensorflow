@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -88,6 +88,10 @@ struct XentFunctor<CPUDevice, T> {
 
 REGISTER_KERNEL_BUILDER(Name("SoftmaxCrossEntropyWithLogits")
                             .Device(DEVICE_CPU)
+                            .TypeConstraint<Eigen::half>("T"),
+                        SoftmaxXentWithLogitsOp<CPUDevice, Eigen::half>);
+REGISTER_KERNEL_BUILDER(Name("SoftmaxCrossEntropyWithLogits")
+                            .Device(DEVICE_CPU)
                             .TypeConstraint<float>("T"),
                         SoftmaxXentWithLogitsOp<CPUDevice, float>);
 REGISTER_KERNEL_BUILDER(Name("SoftmaxCrossEntropyWithLogits")
@@ -98,8 +102,16 @@ REGISTER_KERNEL_BUILDER(Name("SoftmaxCrossEntropyWithLogits")
 #if GOOGLE_CUDA
 REGISTER_KERNEL_BUILDER(Name("SoftmaxCrossEntropyWithLogits")
                             .Device(DEVICE_GPU)
+                            .TypeConstraint<Eigen::half>("T"),
+                        SoftmaxXentWithLogitsOp<GPUDevice, Eigen::half>);
+REGISTER_KERNEL_BUILDER(Name("SoftmaxCrossEntropyWithLogits")
+                            .Device(DEVICE_GPU)
                             .TypeConstraint<float>("T"),
                         SoftmaxXentWithLogitsOp<GPUDevice, float>);
+REGISTER_KERNEL_BUILDER(Name("SoftmaxCrossEntropyWithLogits")
+                            .Device(DEVICE_GPU)
+                            .TypeConstraint<double>("T"),
+                        SoftmaxXentWithLogitsOp<GPUDevice, double>);
 #endif  // GOOGLE_CUDA
 
 }  // namespace tensorflow

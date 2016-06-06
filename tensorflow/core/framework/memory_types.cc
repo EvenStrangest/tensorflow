@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -89,7 +89,8 @@ Status MemoryTypesForNode(const OpRegistryInterface* op_registry,
 
   // Look up the Kernel registered for this node def.
   const KernelDef* kdef = nullptr;
-  status = FindKernelDef(device_type, ndef, &kdef);
+  status =
+      FindKernelDef(device_type, ndef, &kdef, nullptr /* kernel_class_name */);
 
   if (!status.ok() || HasTypeList(*op_def)) {
     // When there is no kernel def for this op or the op's arg is a
